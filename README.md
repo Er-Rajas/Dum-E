@@ -1,105 +1,78 @@
-# Dum-E
+# 🤖 Dum-E: Autonomous Data-Cleaning Agent
 
-**Project status:** Release candidate
-**Version:** `1.0.0-rc`
+Dum-E is an autonomous, RAG-backed data-cleaning orchestrator designed to run locally on resource-constrained hardware (e.g., 4GB VRAM GPUs). It combines the reasoning capabilities of Small Language Models (SLMs like `qwen3:4b`) with robust, deterministic Python data transformation tools to automatically clean, normalize, and repair messy datasets.
 
-Dum-E is a Python data-cleaning agent for pandas DataFrames. It uses a local Ollama model to infer the semantic type of each column, then applies deterministic cleaning tools and produces an auditable Markdown report.
+## ✨ Key Features
 
-## What it does
+* **Autonomous Tool Planning:** Dum-E acts as a true agent. It profiles the dataset to build a "Data Health Snapshot" and dynamically plans which repair tools to execute based on the data's exact needs.
 
-- Supports CSV.
-- Infers each column as `id`, `numeric`, `categorical`, `datetime`, or `text`.
-- Normalizes known missing-value representations such as `N/A`, `null`, `-`, `ERROR`, and `garbage`.
-- Converts word numbers, cleans common numeric formats, normalizes categorical values, and parses dates.
-- Flags unresolved invalid values as missing candidates and asks the user how to handle them.
-- Enforces final pandas dtypes and writes an audit report containing the inferred schema, changes, validation results, and data preview.
+* **Semantic Schema Inference:** Accurately infers column types (`id`, `numeric`, `categorical`, `datetime`, `text`) even when numbers are disguised as text (e.g., `₹ 3,942.08` or word-based numbers like `"two"`).
 
-## Data-analysis and cleaning flow
+* **Local RAG Knowledge Base:** Dum-E's decision-making is guided by a local directory of Markdown policy files (e.g., Policy 06 for Categories, Policy 08 for Integrity). The RAG system handles context retrieval for missing value imputation and shorthand category mapping.
 
-The pipeline deliberately distinguishes analysis from data mutation:
+* **Deterministic Execution:** While the LLM acts as the "brain" for planning and decision-making, the actual transformations are executed by isolated, deterministic Python functions to ensure data integrity and avoid hallucinated data modifications.
 
-```text
-Input dataset
-  -> [Analysis] semantic type inference (LLM; column names, dtypes, 10-row sample)
-  -> [Cleaning] missing-value normalization and deterministic repair tools
-  -> [Analysis] value classification and invalid-value detection
-  -> [Decision] user selects a treatment for missing values
-  -> [Cleaning] dtype enforcement
-  -> [Analysis] final validation and audit report
-  -> Cleaned Parquet dataset + schema.json + report.md
-```
+* **Granular Audit Reporting:** Automatically generates a detailed `report.md` after every run, tracking before-and-after row counts, distinct category mappings (e.g., `"W" -> "west"`), cell-level changes, and a final Data Integrity Status (`pass`, `pass_with_warnings`, `fail`).
 
-The LLM determines the expected meaning of columns; it does not perform the transformations. Cleaning, validation, and reporting are handled by local deterministic code.
+## 🧠 Architecture: The 3-Stage Pipeline
 
-## Requirements
+1. **Data Profiler (Stage 1):** Scans the incoming dataset (CSV/Parquet) and creates a compact profile of pandas dtypes, sample values, missing counts, and categorical distributions without blowing up the context window.
 
-- Python 3.10 or later
-- An Ollama installation with the selected model available locally
-- Default model: `qwen3:4b`
+2. **The Agent Brain (Stage 2):** Queries the local RAG vector store for relevant cleaning policies. The LLM then outputs a strict JSON tool-execution plan, including targeted mapping dictionaries for categorical shorthand anomalies.
 
-Install the Python dependencies:
+3. **Tool Executor & Validator (Stage 3):** Deterministically executes the planned toolchain:
 
-```bash
-pip install -r requirments.txt
-```
+   * `word_to_num`: Converts text numbers (e.g., "nine") to digits.
+   * `numeric_cleaner`: Strips currency symbols, commas, and whitespace.
+   * `datetime_cleaner`: Standardizes date strings into datetime objects.
+   * `categorical_cleaner`: Normalizes casing, strips whitespace, and maps shorthand values based on the Agent's plan.
+   * `missing_value_handler`: Applies LLM-chosen imputation (mean, median, mode) guided by skewness and RAG policy.
+   * `dtype_converter`: Enforces final inferred schema types.
 
-Pull the default model if needed:
+## 🛠️ Setup & Requirements
 
-```bash
-ollama pull qwen3:4b
-```
+* **Python 3.10+**
+* **Ollama** (running locally with `qwen3:4b` or your preferred SLM)
 
-## Run from the command line
+### Installation
 
-```bash
-python agent/dume_runner.py <input_file> <output_folder>
-```
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/Er-Rajas/Dum-E.git
+   cd Dum-E
+   ```
 
-Example:
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-```bash
-python agent/dume_runner.py data/input.csv output
-```
+3. Ensure Ollama is running and your target model is pulled:
+   ```bash
+   ollama pull qwen3:4b
+   ```
 
-During a run, Dum-E may prompt for a missing-value method. Available methods are `ffill`, `bfill`, `mean`, `median`, `mode`, `drop`, and `increment`.
+## 🚀 Usage
 
-The output folder receives:
-
-- `cleaned_data.parquet` — cleaned dataset
-- `schema.json` — inferred semantic type for every column
-- `report.md` — run audit report
-
-For a small in-memory example, run:
+Run Dum-E directly from your terminal by pointing it to your raw dataset and an output directory:
 
 ```bash
-python test.py
+python agent/dume_runner.py "path/to/raw_data.csv" "output_directory/"
 ```
 
-## Project layout
+**Outputs Generated:**
 
-```text
-agent/
-  agent.py          Core Dum-E orchestration and reporting
-  dume_runner.py    Command-line runner
-tools/
-  *_cleaner.py      Deterministic cleaning and conversion tools
-  value_classifier.py
-                     Post-cleaning value validation
-  missing_*.py      Missing-value normalization and treatment
-test.py             Example dataset and manual smoke test
-```
+* `cleaned_data.parquet`: The fully cleaned and typed dataset.
+* `schema.json`: The final inferred schema mapping.
+* `report.md`: A human-readable Markdown log of every decision, missing value imputation, and cell-level change Dum-E made.
 
-## Planned improvements
+## 📂 Project Structure
 
-1. Improve LLM response timing, including measuring inference latency and reducing prompt/token overhead.
-2. Send only the data needed for an LLM decision—such as column metadata, representative samples, and invalid/missing-value summaries—instead of passing an entire DataFrame.
-3. Make analysis stages explicit in code and reports so it is clear which results are inferred analysis, deterministic transformations, user decisions, and final validation.
-4. Add automated tests for the individual tools and full CLI flow before the final `1.0.0` release.
+* `agent/`: Contains the main `agent.py` logic and the `dume_runner.py` CLI entry point.
+* `Tools/Dum_E_tools/`: The suite of deterministic Python cleaning scripts (categorical, numeric, datetime, word_to_num, etc.).
+* `Knowledge/Dum_E_knowledge/`: Markdown files acting as the local RAG knowledge base to dictate cleaning rules.
 
-## Current release notes
+## 📝 Future Roadmap
 
-`1.0.0-rc` is a release candidate. Validate it with representative datasets before using it in production, especially where incorrect type inference or automatic missing-value treatment could affect downstream decisions.
-
-## License
-
-This project is distributed under the [Apache License 2.0](LICENSE).
+* **Optimization:** Batch LLM prompts to reduce execution time.
+* **Integration:** Wrap Dum-E into a Model Context Protocol (MCP) compatible tool so orchestrators like `FRIDAY` can trigger it seamlessly.
